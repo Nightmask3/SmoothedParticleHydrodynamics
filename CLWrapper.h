@@ -8,39 +8,58 @@ struct CLBuffer
 		READ_WRITE
 	};
 	cl::Buffer bufferValue;
-	float bufferSize;
-	float * dataPointer;
+	size_t bufferSize;
+	cl_float * dataPointer;
 };
 
 class CLWrapper
 {
+public:
 	CLWrapper();
 	~CLWrapper();
 
-	// RunKernel and InitKernel are pure virtual as they are dependent on implementation and must be defined by the client inherited class
-	virtual void RunKernel() = 0;
-	virtual void InitKernel() = 0;
+	// Getters/Setters
+	inline cl::Buffer & BufferValue(int index) { return allBuffers_[index].bufferValue; }
+	inline float * DataPointer(int index) { return allBuffers_[index].dataPointer; }
+	// Utilities
+	inline void FinishCommandQueue() { queue_.finish(); }
+	inline void CreateKernel(std::string kernelName) { kernel_ = cl::Kernel(program_, kernelName.c_str(), &err_); }
+
+	// Writes buffers, enqueues kernel execution, reads buffers
+	void RunKernel(int GlobalWorkSize);
+	// Allows for external setting of the arguments for classes without access to the kernel
+	template <typename T>
+	void SetKernelArgument(int ArgIndex, T Argument);
 	// loads, creates and builds kernel program from specified string
 	void loadProgram(std::string kernel_source);
 	// Bulk Buffer Read/Write methods
 	void readAllBuffers();
 	void writeAllBuffers();
 	// Buffer request methods
-	void requestFloatBuffer(float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType);
-	void requestFloat4Buffer(float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType);
-private:
+	void requestFloatBuffer(cl_float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType);
+	void requestFloat4Buffer(cl_float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType);
+protected:
 	// Handles to the various OpenCL objects required for execution
-	cl::Kernel _kernel;
-	cl::Platform _platform;
-	cl::Device _device;
-	cl::Context _context;
-	cl::CommandQueue _queue;
-	cl::Program _program;
-	std::vector<cl::Platform> _allPlatforms;
-	std::vector<cl::Device> _allDevices;
-
-	std::vector<CLBuffer> _allBuffers;
+	cl::Kernel kernel_;
+	cl::Platform platform_;
+	cl::Device device_;
+	cl::Context context_;
+	cl::CommandQueue queue_;
+	cl::Program program_;
+	std::vector<cl::Platform> allPlatforms_;
+	std::vector<cl::Device> allDevices_;
+	std::vector<CLBuffer> allBuffers_;
 
 	// debugging variables
-	cl_int _err;
+	cl_int err_;
 };
+
+template<typename T>
+inline void CLWrapper::SetKernelArgument(int ArgIndex, T Argument)
+{
+	err_ = kernel_.setArg(ArgIndex, Argument);
+	Zilch::Console::Write("Setting argument :");
+	Zilch::Console::Write(ArgIndex);
+	Zilch::Console::Write(" -> Status : ");
+	Zilch::Console::WriteLine(oclErrorString(err_));
+}

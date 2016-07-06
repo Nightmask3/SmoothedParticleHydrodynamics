@@ -2,6 +2,9 @@
 // We use precompiled headers to support the fastest possible compilation
 #define ZeroImportDll
 #include <Windows.h>
+#include <iostream>
+#include <fstream>
+#include <string>
 #include "Zilch.hpp"
 #include "ZeroEngine.hpp"
 
@@ -17,4 +20,5 @@ ZilchDeclareStaticLibraryAndPlugin(FluidSPHPluginLibrary, FluidSPHPluginPlugin);
 #include "util.h"
 #include "CLWrapper.h"
 #include "FluidSPHPlugin.hpp"
+#include "ZeroEngine.hpp"
 // Auto Includes (used by Visual Studio plugins, do not remove this line)

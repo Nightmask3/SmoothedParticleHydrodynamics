@@ -1,4 +1,5 @@
 #include "FluidSPHPluginPrecompiled.hpp"
+#include "SPH_Kernel.cl"
 #define PI 3.14159265359f
 //***************************************************************************
 ZilchDefineType(FluidSPHPlugin, FluidSPHPluginLibrary, builder, type)
@@ -28,28 +29,39 @@ ZilchDefineType(FluidSPHPlugin, FluidSPHPluginLibrary, builder, type)
 //***************************************************************************
 FluidSPHPlugin::FluidSPHPlugin()
 {
-  Zilch::Console::WriteLine("FluidSPHPlugin::FluidSPHPlugin (Constructor)");
+  //Zilch::Console::WriteLine("FluidSPHPlugin::FluidSPHPlugin (Constructor)");
 }
 
 //***************************************************************************
 FluidSPHPlugin::~FluidSPHPlugin()
 {
-  Zilch::Console::WriteLine("FluidSPHPlugin::~FluidSPHPlugin (Destructor)");
+  // Close output log stream
+ // if(outputStream != NULL)
+//	fclose(outputStream);
+  //Zilch::Console::WriteLine("FluidSPHPlugin::~FluidSPHPlugin (Destructor)");
 }
 
 //***************************************************************************
 void FluidSPHPlugin::Initialize(ZeroEngine::CogInitializer* initializer)
 {
-  Zilch::Console::WriteLine("FluidSPHPlugin::Initialize");
+  //Zilch::Console::WriteLine("FluidSPHPlugin::Initialize");
   
   H2 = (InteractionRadius * InteractionRadius);
   H8 = (H2 * H2) * (H2 * H2);
+
+  // Calculate number of particles from bounding box parameters
   PlaceParticles();
+  
+  VelocityHalfStep.resize(4 * ParticleCount);
+  Acceleration.resize(4 * ParticleCount);
   Density.resize(ParticleCount);
-  // constant density terms calculated with initial default mass (1) first (as they are used in normalizing mass)
+
+  // Constant density terms calculated with initial default mass (1) first (as they are used in normalizing mass)
   ConstantDensityKernelTerm = 4 * ((ParticleMass / PI) / H8);
   ConstantDensitySumTerm = 4 * ((ParticleMass / PI) / H2);
+
   NormalizeMass();
+
   // constant terms calculated once again with new normalized mass
   ConstantDensityKernelTerm = 4 * ((ParticleMass / PI) / H8);
   ConstantDensitySumTerm = 4 * ((ParticleMass / PI) / H2);
@@ -58,14 +70,30 @@ void FluidSPHPlugin::Initialize(ZeroEngine::CogInitializer* initializer)
   CP = 15 * BulkModulus;
   CV = -40 * Viscosity;
 
-  Zilch::Console::WriteLine(ParticleCount);
+  // load and build kernel program
+  clObject.loadProgram(kernel_source);
+  clObject.CreateKernel("SPH_kernel");
 
-  VelocityHalfStep.resize(4 * ParticleCount);
-  Acceleration.resize(4 * ParticleCount);
+  // Request buffers
+  int sizePos = sizeof(Position);
+  clObject.requestFloat4Buffer(&Position[0], ParticleCount, CLBuffer::BufferTypes::READ_WRITE);
+  clObject.requestFloat4Buffer(&VelocityHalfStep[0], ParticleCount, CLBuffer::BufferTypes::READ_WRITE);
+  clObject.requestFloat4Buffer(&VelocityFullStep[0], ParticleCount, CLBuffer::BufferTypes::READ_WRITE);
+  clObject.requestFloat4Buffer(&Acceleration[0], ParticleCount, CLBuffer::BufferTypes::READ_WRITE);
+  clObject.requestFloatBuffer(&Density[0], ParticleCount, CLBuffer::BufferTypes::READ_WRITE);
 
   // Set kernel arguments
   InitKernel();
-  ZeroConnectThisTo(this->GetSpace(), "LogicUpdate", "OnLogicUpdate");
+  // Write host buffer memory to device memory
+  clObject.writeAllBuffers();
+  ZeroConnectThisTo(this->GetSpace(), "LogicUpdate", "OnLogicUpdate"); 
+  
+  Zilch::Console::Write("Particle Count ->");
+  Zilch::Console::WriteLine(ParticleCount);
+  // Redirect stdout to the output log file
+  // File pointer to the output log for OpenCL
+  //if ((outputStream = freopen("C:\\Users\\sainarayan.n\\Documents\\ZeroProjects\\BackupSPH\\FluidSPH\\Content\\FluidSPHPlugin\\OpenCLOutputLog.txt", "w", stdout)) == NULL)
+  //	  exit(-1);
 }
 
 //***************************************************************************
@@ -73,27 +101,19 @@ void FluidSPHPlugin::OnLogicUpdate(ZeroEngine::UpdateEvent* event)
 {
 	for (int i = 0; i < NumberofSteps; ++i)
 	{
-		ComputeAcceleration();
+		//ComputeAcceleration();
+		//LeapfrogIntegrator(event->GetDt());
+		clObject.RunKernel(ParticleCount);
 		LeapfrogIntegrator(event->GetDt());
 	}
+	//ReflectBoundaryConditions();
 	UpdateArray();
-}
-
-void FluidSPHPlugin::InitKernel()
-{
-}
-
-void FluidSPHPlugin::RunKernel()
-{
 }
 
 void FluidSPHPlugin::ComputeDensity()
 {
 	// Reset entire density array every time
-	for(int i = 0; i < ParticleCount; ++i)
-	{
-		Density[i] = 0;
-	}
+	std::fill(Density.begin(), Density.end(), 0.0f);
 
 	for (int i = 0; i < ParticleCount; ++i)
 	{
@@ -315,10 +335,11 @@ void FluidSPHPlugin::PlaceParticles()
 			}
 		}
 	}
+	// Gets handle to particle archetype
+	Zilch::HandleOf<ZeroEngine::Archetype> handle = ZeroEngine::Archetype::Find(this->FluidParticleArchetypeName.c_str());
 	// Instantiates the particles and adds them to array
 	for (int i = 0; i < ParticleCount; ++i)
 	{
-		Zilch::HandleOf<ZeroEngine::Archetype> handle = ZeroEngine::Archetype::Find(this->FluidParticleArchetypeName.c_str());
 		FluidParticlesArray.push_back(this->GetSpace()->CreateAtPosition(handle, Zilch::Real3(Position[(4 * i) + 0], Position[(4 * i) + 1], this->GetOwner()->GetTransform()->GetWorldTranslation().z)));
 	}
 }
@@ -335,6 +356,47 @@ void FluidSPHPlugin::NormalizeMass()
 		rhos += Density[i];
 	}
 	ParticleMass *= ((rho0 * rhos) / rho2s);
+}
+
+void FluidSPHPlugin::InitKernel()
+{
+	// Delta-time
+	clObject.SetKernelArgument(0, 0.016f);
+
+	// Epsilon
+	clObject.SetKernelArgument(1, 0.0001f);
+
+	// Constants
+	clObject.SetKernelArgument(2, ConstantDensitySumTerm);
+	clObject.SetKernelArgument(3, ConstantDensityKernelTerm);
+	clObject.SetKernelArgument(4, H2);
+	clObject.SetKernelArgument(5, ReferenceDensity);
+	clObject.SetKernelArgument(6, InteractionRadius);
+	clObject.SetKernelArgument(7, C0);
+	clObject.SetKernelArgument(8, CP);
+	clObject.SetKernelArgument(9, CV);
+
+	// Boundary values
+	float xMin = this->GetOwner()->GetTransform()->GetWorldTranslation().x - HalfGridBoundsX;
+	float xMax = this->GetOwner()->GetTransform()->GetWorldTranslation().x + HalfGridBoundsX;
+	float yMin = this->GetOwner()->GetTransform()->GetWorldTranslation().y - HalfGridBoundsY;
+	float yMax = this->GetOwner()->GetTransform()->GetWorldTranslation().y + HalfGridBoundsY;
+	clObject.SetKernelArgument(10, xMin);
+	clObject.SetKernelArgument(11, xMax);
+	clObject.SetKernelArgument(12, yMin);
+	clObject.SetKernelArgument(13, yMax);
+
+	// Buffer values
+	clObject.SetKernelArgument(14, clObject.BufferValue(0));
+	clObject.SetKernelArgument(15, clObject.BufferValue(1));
+	clObject.SetKernelArgument(16, clObject.BufferValue(2));
+	clObject.SetKernelArgument(17, clObject.BufferValue(3));
+	clObject.SetKernelArgument(18, clObject.BufferValue(4));
+
+	// Initialize local memory
+	clObject.SetKernelArgument(19, cl::Local(ParticleCount));
+
+	clObject.FinishCommandQueue();
 }
 
 int FluidSPHPlugin::BoxIndicator(float xVal, float yVal)

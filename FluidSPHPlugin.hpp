@@ -16,8 +16,6 @@ public:
   
   void OnLogicUpdate(ZeroEngine::UpdateEvent* event);
  
-  void InitKernel();
-  void RunKernel();
   void ComputeDensity();
   void ComputeAcceleration();
   void DampenReflections(int which, float barrier);
@@ -49,20 +47,21 @@ public:
 private:
 	void PlaceParticles();
 	void NormalizeMass();
+	void InitKernel();
 	int BoxIndicator(float xVal, float yVal);
 	int CircleIndictor(float xVal, float yVal);
 
 	// Array of Handles to the fluid particle gameobjects
 	std::vector<Zilch::HandleOf<ZeroEngine::Cog>> FluidParticlesArray;
 	// Fluid Particle properties
-	std::vector<float> Position;
-	std::vector<float> VelocityFullStep;
-	std::vector<float> VelocityHalfStep;
-	std::vector<float> Acceleration;
-	std::vector<float> Density;
+	std::vector<cl_float> Position;
+	std::vector<cl_float> VelocityFullStep;
+	std::vector<cl_float> VelocityHalfStep;
+	std::vector<cl_float> Acceleration;
+	std::vector<cl_float> Density;
 	// Number of particles to initialize  
 	int ParticleCount;
-	// Mass of each fluid particle
+	// Mass of each fluid particle - assumed to be 1 in beginning and recalculated
 	float ParticleMass = 1.0;
 	// Density calculation constant kernel term
 	float ConstantDensityKernelTerm;
@@ -81,7 +80,8 @@ private:
 	float H8;
 
 	// OpenCL wrapper object
-	//CLWrapper clObject;
+	CLWrapper clObject;
+	FILE* outputStream;
 };
 
 // An example of a custom event that we can send

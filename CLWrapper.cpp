@@ -5,48 +5,58 @@ CLWrapper::CLWrapper()
 	// Initialize OpenCL object and context
 
 	// Get all platforms that are OpenCL compatible
-	_err = cl::Platform::get(&_allPlatforms);
+	err_ = cl::Platform::get(&allPlatforms_);
 	Zilch::Console::Write("Collect all OpenCL platforms. Status : ");
-	Zilch::Console::WriteLine(oclErrorString(_err));
+	Zilch::Console::WriteLine(oclErrorString(err_));
 
-	if (_allPlatforms.size() == 0)
+	if (allPlatforms_.size() == 0)
 	{
 		Zilch::Console::WriteLine("No OpenCL compatible platforms found, check installation!");
 		exit(1);
 	}
 
 	// Use default platform 
-	_platform = _allPlatforms[0];
+	platform_ = allPlatforms_[0];
 	Zilch::Console::Write("Using platform: ");
-	Zilch::Console::WriteLine(_platform.getInfo<CL_PLATFORM_NAME>().c_str());
+	Zilch::Console::WriteLine(platform_.getInfo<CL_PLATFORM_NAME>().c_str());
 
 	// Get all devices registered to platform
-	_err = _platform.getDevices(CL_DEVICE_TYPE_ALL, &_allDevices);
+	err_ = platform_.getDevices(CL_DEVICE_TYPE_ALL, &allDevices_);
 	Zilch::Console::Write("Collect all OpenCL devices registered to platform. Status : ");
-	Zilch::Console::WriteLine(oclErrorString(_err));
+	Zilch::Console::WriteLine(oclErrorString(err_));
 
-	if (_allDevices.size() == 0) 
+	if (allDevices_.size() == 0) 
 	{
 		Zilch::Console::WriteLine(" No OpenCL compatible devices found, check installation!");
 		exit(1);
 	}
 
 	// Use default devices
-	_device = _allDevices[0];
+	device_ = allDevices_[0];
 
 	// Create context
-	_context = cl::Context({ _device });
+	context_ = cl::Context({ device_ });
 
 	// Create command queue
-	_queue = cl::CommandQueue(_context, _device, 0, &_err);
+	queue_ = cl::CommandQueue(context_, device_, 0, &err_);
 
-	Zilch::Console::Write("Creating command queue. Status : ");
-	Zilch::Console::WriteLine(oclErrorString(_err));
+	Zilch::Console::Write("Creating command queue. -> Status : ");
+	Zilch::Console::WriteLine(oclErrorString(err_));
 
 }
 
 CLWrapper::~CLWrapper()
 {
+}
+
+void CLWrapper::RunKernel(int GlobalWorkSize)
+{
+	writeAllBuffers();
+	err_ = queue_.enqueueNDRangeKernel(kernel_, cl::NullRange, cl::NDRange(GlobalWorkSize), cl::NullRange);
+	queue_.finish();
+	//Zilch::Console::Write("Running kernel. -> Status :");
+	//Zilch::Console::WriteLine(oclErrorString(err_));
+	readAllBuffers();
 }
 
 void CLWrapper::loadProgram(std::string kernel_source)
@@ -56,14 +66,14 @@ void CLWrapper::loadProgram(std::string kernel_source)
 
 	// Make program from source
 	cl::Program::Sources source(1, std::make_pair(kernel_source.c_str(), programLength));
-	_program = cl::Program(_context, source);
+	program_ = cl::Program(context_, source);
 
 	// Build program
-	_err = _program.build(_allDevices);
-	Zilch::Console::Write("Building program. Status : ");
-	Zilch::Console::WriteLine(oclErrorString(_err));
+	err_ = program_.build(allDevices_);
+	Zilch::Console::Write("Building program... -> Status : ");
+	Zilch::Console::WriteLine(oclErrorString(err_));
 
-	if (_err != CL_SUCCESS)
+	if (err_ != CL_SUCCESS)
 	{
 		Zilch::Console::WriteLine("Building program failed!");
 		exit(1);
@@ -72,76 +82,82 @@ void CLWrapper::loadProgram(std::string kernel_source)
 
 void CLWrapper::readAllBuffers()
 {
-	for each (CLBuffer buf in _allBuffers)
+	for each (CLBuffer buf in allBuffers_)
 	{
-		_err = _queue.enqueueReadBuffer(buf.bufferValue, CL_TRUE, 0, buf.bufferSize, buf.dataPointer, NULL, NULL);
-		if (_err != CL_SUCCESS)
+		err_ = queue_.enqueueReadBuffer(buf.bufferValue, CL_TRUE, 0, buf.bufferSize, buf.dataPointer, NULL, NULL);
+		if (err_ != CL_SUCCESS)
 		{
-			Zilch::Console::WriteLine("Error in reading buffers!");
-			exit(1);
+			Zilch::Console::Write("Reading buffers. -> Status : ");
+			Zilch::Console::WriteLine(oclErrorString(err_));
 		}
 	}
 }
 
 void CLWrapper::writeAllBuffers()
 {
-	for each (CLBuffer buf in _allBuffers)
+	for each (CLBuffer buf in allBuffers_)
 	{
-		_err = _queue.enqueueWriteBuffer(buf.bufferValue, CL_TRUE, 0, buf.bufferSize, buf.dataPointer, NULL, NULL);
-		if (_err != CL_SUCCESS)
+		err_ = queue_.enqueueWriteBuffer(buf.bufferValue, CL_TRUE, 0, buf.bufferSize, buf.dataPointer, NULL, NULL);
+		queue_.finish();
+		if (err_ != CL_SUCCESS)
 		{
-			Zilch::Console::WriteLine("Error in writing buffers!");
-			exit(1);
+			Zilch::Console::Write("Writing buffers. -> Status : ");
+			Zilch::Console::WriteLine(oclErrorString(err_));
 		}
 	}
 }
 
-void CLWrapper::requestFloatBuffer(float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType)
+void CLWrapper::requestFloatBuffer(cl_float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType)
 {
-	float arraySize = BufferSize * sizeof(cl_float);
+	size_t arraySize = BufferSize * sizeof(cl_float);
 	CLBuffer newBuffer;
 	switch (BufferType)
 	{
 	case CLBuffer::BufferTypes::READ :
-		newBuffer.bufferValue = cl::Buffer(_context, CL_MEM_READ_ONLY, arraySize, NULL, &_err);
+		newBuffer.bufferValue = cl::Buffer(context_, CL_MEM_READ_ONLY, arraySize, NULL, &err_);
 		newBuffer.dataPointer = ArrayPointer;
 		newBuffer.bufferSize = arraySize;
 		break;
 	case CLBuffer::BufferTypes::WRITE:
-		newBuffer.bufferValue = cl::Buffer(_context, CL_MEM_WRITE_ONLY, arraySize, NULL, &_err);
+		newBuffer.bufferValue = cl::Buffer(context_, CL_MEM_WRITE_ONLY, arraySize, NULL, &err_);
 		newBuffer.dataPointer = ArrayPointer;
 		newBuffer.bufferSize = arraySize;
 		break;
 	case CLBuffer::BufferTypes::READ_WRITE:
-		newBuffer.bufferValue = cl::Buffer(_context, CL_MEM_READ_WRITE, arraySize, NULL, &_err);
+		newBuffer.bufferValue = cl::Buffer(context_, CL_MEM_READ_WRITE, arraySize, NULL, &err_);
 		newBuffer.dataPointer = ArrayPointer;
 		newBuffer.bufferSize = arraySize;
 		break;
 	}
-	_allBuffers.push_back(newBuffer);
+
+	allBuffers_.push_back(newBuffer);
 }
 
-void CLWrapper::requestFloat4Buffer(float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType)
+void CLWrapper::requestFloat4Buffer(cl_float * ArrayPointer, int BufferSize, CLBuffer::BufferTypes BufferType)
 {
-	float arraySize = BufferSize * sizeof(cl_float4);
+	size_t arraySize = BufferSize * sizeof(cl_float4);
 	CLBuffer newBuffer;
 	switch (BufferType)
 	{
 	case CLBuffer::BufferTypes::READ:
-		newBuffer.bufferValue = cl::Buffer(_context, CL_MEM_READ_ONLY, arraySize, NULL, &_err);
+		newBuffer.bufferValue = cl::Buffer(context_, CL_MEM_READ_ONLY, arraySize, NULL, &err_);
 		newBuffer.dataPointer = ArrayPointer;
 		newBuffer.bufferSize = arraySize;
 		break;
 	case CLBuffer::BufferTypes::WRITE:
-		newBuffer.bufferValue = cl::Buffer(_context, CL_MEM_WRITE_ONLY, arraySize, NULL, &_err);
+		newBuffer.bufferValue = cl::Buffer(context_, CL_MEM_WRITE_ONLY, arraySize, NULL, &err_);
 		newBuffer.dataPointer = ArrayPointer;
 		newBuffer.bufferSize = arraySize;
 		break;
 	case CLBuffer::BufferTypes::READ_WRITE:
-		newBuffer.bufferValue = cl::Buffer(_context, CL_MEM_READ_WRITE, arraySize, NULL, &_err);
+		newBuffer.bufferValue = cl::Buffer(context_, CL_MEM_READ_WRITE, arraySize, NULL, &err_);
 		newBuffer.dataPointer = ArrayPointer;
 		newBuffer.bufferSize = arraySize;
 		break;
 	}
-	_allBuffers.push_back(newBuffer);
+	if (err_ != CL_SUCCESS)
+	{
+		Zilch::Console::WriteLine("Error in creating Buffer!");
+	}
+	allBuffers_.push_back(newBuffer);
 }
