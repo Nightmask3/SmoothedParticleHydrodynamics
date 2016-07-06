@@ -21,28 +21,11 @@ local float4* pblock
     int numTiles = globalSize/localSize;
 
     // Zero out the density term of this work-item
-    density[gid] = 0;
+    density[gid] = 0.0f;
     density[gid] += ConstantDensitySumTerm;
 
     float4 thisPosition = position[gid];
-    float densityTerm = 0.0;
-    
-	/*for (int i = 0; i < globalSize; ++i)
-	{
-		float4 otherPosition = position[i];
-
-		float4 deltaPosition = thisPosition - otherPosition;
-
-		float r2 = (deltaPosition.x * deltaPosition.x) + (deltaPosition.y * deltaPosition.y) + (deltaPosition.z * deltaPosition.z);
-		float z = (H2 - r2) + eps;
-
-		if (z > 0)
-		{
-			float rho_ij = ConstantDensityKernelTerm * z * z * z;
-			density[gid] += rho_ij;
-			density[i] += rho_ij;
-		}
-	}*/
+    float densityTerm = 0.0f;
 	
 	// Outer loop iterates over all the work-group blocks
     for(int i = 0; i < numTiles; ++i)
@@ -63,12 +46,13 @@ local float4* pblock
             float r2 = (deltaPosition.x * deltaPosition.x) + (deltaPosition.y * deltaPosition.y) + (deltaPosition.z * deltaPosition.z);
             float z = (H2 - r2) + eps;
 
-            if(z > 0) 
+            if(z > 0.0f) 
             {
                 float rho_ij = ConstantDensityKernelTerm * z * z * z;
                 densityTerm += rho_ij;
             }
         }
+
         // Synchronize so that next tile can be loaded
         barrier(CLK_LOCAL_MEM_FENCE);
     }
@@ -77,7 +61,7 @@ local float4* pblock
 }
 
 void Acceleration_Calculation(
-float eps,
+float eps, 
 float ConstantDensitySumTerm, float ConstantDensityKernelTerm,
 float H2, float ReferenceDensity, float InteractionRadius,
 float C0, float CP, float CV,
@@ -93,35 +77,33 @@ local float4* pblock
     // Id of this work-item in global index space
     int gid = get_global_id(0);
     // Id of this work-item within it's work group
-    int tid = get_local_id(0);
+   // int tid = get_local_id(0);
 
     int globalSize = get_global_size(0);
-    int localSize = get_local_size(0);
-    int numTiles = globalSize/localSize;
+   // int localSize = get_local_size(0);
+   // int numTiles = globalSize/localSize;
 
     // Set acceleration parameters
-    acceleration[gid].x = 0.0;
-    acceleration[gid].y = -0.1;
+    acceleration[gid].x = 0.0f;
+    acceleration[gid].y = -0.1f;
 
     float4 thisPosition = position[gid];
     float4 thisVelocity = velocity_full[gid];
     float rhoi = density[gid];
-    float accelerationTermX = 0.0;
-    float accelerationTermY = 0.0;
+    float accelerationTermX = 0.0f;
+    float accelerationTermY = 0.0f;
 
 	for (int i = 0; i < globalSize; ++i)
 	{
-		float4 otherPosition = position[i];
-
-		float4 deltaPosition = thisPosition - otherPosition;
+		float4 deltaPosition = thisPosition - position[i];
 
 		float r2 = (deltaPosition.x * deltaPosition.x) + (deltaPosition.y * deltaPosition.y) + (deltaPosition.z * deltaPosition.z);
 		float z = (H2 - r2) + eps;
-		if (z > 0 && r2 != 0.0f) 
+		if (z > 0.0f && r2 != 0.0f) 
 		{
 			float rhoj = density[i];
 			float q = sqrt(r2) / InteractionRadius;
-			float u = 1 - q;
+			float u = 1.0f - q;
 			float w0 = C0 * (u / rhoi / rhoj);
 			float wP = w0 * CP * (rhoi + rhoj - (2 * ReferenceDensity)) * (u / q);
 			float wV = w0 * CV;
@@ -182,24 +164,100 @@ global float4* acceleration
     position[gid] += velocity_full[gid] * dt;
 }
 
-void ReflectBoundaryConditions(
-float xMin,
-float xMax,
-float yMin,
-float yMax
+void DampenReflectionsX(
+global float4* position,
+global float4* velocity_full,
+global float4* velocity_half,
+float Restitution,
+float barrier
 )
 {
+	// Id of this work-item in global index space
+	int gid = get_global_id(0);
+
+	// Ignore degenerate cases
+	//if (velocity_full[gid].x == 0.0f)
+	//	return;
+
+	// find time since crossing barrier
+	float tbounce = (position[gid].x - barrier) / velocity_full[gid].x;
+	
+	// Scale back the distance traveled based on time from collision
+	position[gid].x -= velocity_full[gid].x * (1 - Restitution) * tbounce;
+	position[gid].y -= velocity_full[gid].y * (1 - Restitution) * tbounce;
+
+	// Reflect the position and velocity according to which axis the penetration occured on
+	position[gid].x = 2 * barrier - position[gid].x;
+	velocity_full[gid].x = -velocity_full[gid].x;
+	velocity_half[gid].x = -velocity_half[gid].x;
+
+	// Damp the velocities
+	velocity_full[gid] *= Restitution;
+	velocity_half[gid] *= Restitution;
+}
+
+void DampenReflectionsY(
+	global float4* position,
+	global float4* velocity_full,
+	global float4* velocity_half,
+	float Restitution,
+	float barrier
+)
+{
+	// Id of this work-item in global index space
+	int gid = get_global_id(0);
+
+	// Ignore degenerate cases
+	//if (velocity_full[gid].y == 0.0f)
+	//	return;
+
+	// find time since crossing barrier
+	float tbounce = (position[gid].y - barrier) / velocity_full[gid].y;
+
+	// Scale back the distance traveled based on time from collision
+	position[gid].x -= velocity_full[gid].x * (1 - Restitution) * tbounce;
+	position[gid].y -= velocity_full[gid].y * (1 - Restitution) * tbounce;
+
+	// Reflect the position and velocity according to which axis the penetration occured on
+	position[gid].y = 2 * barrier - position[gid].y;
+	velocity_full[gid].y = -velocity_full[gid].y;
+	velocity_half[gid].y = -velocity_half[gid].y;
+	
+	// Damp the velocities
+	velocity_full[gid] *= Restitution;
+	velocity_half[gid] *= Restitution;
+}
+
+
+
+void ReflectBoundaryConditions(
+	global float4* position,
+	global float4* velocity_full,
+	global float4* velocity_half,
+	float Restitution,
+	float xMin,
+	float xMax,
+	float yMin,
+	float yMax
+)
+{
+	// Id of this work-item in global index space
+	int gid = get_global_id(0);
+
+	if (position[gid].x < xMin)
+		DampenReflectionsX(position, velocity_full, velocity_half, Restitution, xMin);
+	else if (position[gid].x > xMax)
+		DampenReflectionsX(position, velocity_full, velocity_half, Restitution, xMax);
+
+	if (position[gid].y < yMin)
+		DampenReflectionsY(position, velocity_full, velocity_half, Restitution, yMin);
+	else if (position[gid].y > yMax)
+		DampenReflectionsY(position, velocity_full, velocity_half, Restitution, yMax);
 
 }
 
-void DampenReflections(
-int globalIndex,
-float barrier
-)
-{}
-
 void kernel SPH_kernel(
-float dt, float eps,
+float dt, float eps, float Restitution,
 float ConstantDensitySumTerm, float ConstantDensityKernelTerm,
 float H2, float ReferenceDensity, float InteractionRadius,
 float C0, float CP, float CV,
@@ -217,6 +275,8 @@ local float4* pblock
     Acceleration_Calculation(eps, ConstantDensitySumTerm, ConstantDensityKernelTerm, H2, ReferenceDensity, InteractionRadius, C0, CP, CV,
                              position, velocity_full, acceleration, density, pblock);
 
-   // LeapfrogIntegrator(dt4, position, velocity_full, velocity_half, acceleration);
+   LeapfrogIntegrator(dt4, position, velocity_full, velocity_half, acceleration);
+
+   ReflectBoundaryConditions(position, velocity_full, velocity_half, Restitution, xMin, xMax, yMin, yMax);
 }
 );

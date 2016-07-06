@@ -104,7 +104,6 @@ void FluidSPHPlugin::OnLogicUpdate(ZeroEngine::UpdateEvent* event)
 		//ComputeAcceleration();
 		//LeapfrogIntegrator(event->GetDt());
 		clObject.RunKernel(ParticleCount);
-		LeapfrogIntegrator(event->GetDt());
 	}
 	//ReflectBoundaryConditions();
 	UpdateArray();
@@ -238,8 +237,11 @@ void FluidSPHPlugin::DampenReflections(int which, float barrier)
 	VelocityHalfStep[which] = -VelocityHalfStep[which];
 
 	// Damp the velocities
-	VelocityFullStep[indexX] *= Restitution; VelocityHalfStep[indexX] *= Restitution;
-	VelocityFullStep[indexY] *= Restitution; VelocityFullStep[indexY] *= Restitution;
+	VelocityFullStep[indexX] *= Restitution; 
+	VelocityFullStep[indexY] *= Restitution; 
+	
+	VelocityHalfStep[indexX] *= Restitution;
+	VelocityHalfStep[indexY] *= Restitution;
 }
 
 void FluidSPHPlugin::ReflectBoundaryConditions()
@@ -366,35 +368,38 @@ void FluidSPHPlugin::InitKernel()
 	// Epsilon
 	clObject.SetKernelArgument(1, 0.0001f);
 
+	// Restitution
+	clObject.SetKernelArgument(2, Restitution);
+
 	// Constants
-	clObject.SetKernelArgument(2, ConstantDensitySumTerm);
-	clObject.SetKernelArgument(3, ConstantDensityKernelTerm);
-	clObject.SetKernelArgument(4, H2);
-	clObject.SetKernelArgument(5, ReferenceDensity);
-	clObject.SetKernelArgument(6, InteractionRadius);
-	clObject.SetKernelArgument(7, C0);
-	clObject.SetKernelArgument(8, CP);
-	clObject.SetKernelArgument(9, CV);
+	clObject.SetKernelArgument(3, ConstantDensitySumTerm);
+	clObject.SetKernelArgument(4, ConstantDensityKernelTerm);
+	clObject.SetKernelArgument(5, H2);
+	clObject.SetKernelArgument(6, ReferenceDensity);
+	clObject.SetKernelArgument(7, InteractionRadius);
+	clObject.SetKernelArgument(8, C0);
+	clObject.SetKernelArgument(9, CP);
+	clObject.SetKernelArgument(10, CV);
 
 	// Boundary values
 	float xMin = this->GetOwner()->GetTransform()->GetWorldTranslation().x - HalfGridBoundsX;
 	float xMax = this->GetOwner()->GetTransform()->GetWorldTranslation().x + HalfGridBoundsX;
 	float yMin = this->GetOwner()->GetTransform()->GetWorldTranslation().y - HalfGridBoundsY;
 	float yMax = this->GetOwner()->GetTransform()->GetWorldTranslation().y + HalfGridBoundsY;
-	clObject.SetKernelArgument(10, xMin);
-	clObject.SetKernelArgument(11, xMax);
-	clObject.SetKernelArgument(12, yMin);
-	clObject.SetKernelArgument(13, yMax);
+	clObject.SetKernelArgument(11, xMin);
+	clObject.SetKernelArgument(12, xMax);
+	clObject.SetKernelArgument(13, yMin);
+	clObject.SetKernelArgument(14, yMax);
 
 	// Buffer values
-	clObject.SetKernelArgument(14, clObject.BufferValue(0));
-	clObject.SetKernelArgument(15, clObject.BufferValue(1));
-	clObject.SetKernelArgument(16, clObject.BufferValue(2));
-	clObject.SetKernelArgument(17, clObject.BufferValue(3));
-	clObject.SetKernelArgument(18, clObject.BufferValue(4));
+	clObject.SetKernelArgument(15, clObject.BufferValue(0));
+	clObject.SetKernelArgument(16, clObject.BufferValue(1));
+	clObject.SetKernelArgument(17, clObject.BufferValue(2));
+	clObject.SetKernelArgument(18, clObject.BufferValue(3));
+	clObject.SetKernelArgument(19, clObject.BufferValue(4));
 
 	// Initialize local memory
-	clObject.SetKernelArgument(19, cl::Local(ParticleCount));
+	clObject.SetKernelArgument(20, cl::Local(ParticleCount));
 
 	clObject.FinishCommandQueue();
 }
