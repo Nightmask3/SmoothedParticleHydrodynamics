@@ -2,6 +2,5 @@ A simple 2D SPH implementation that is based on the work of M. Muller, D. Charyp
 Uses the kernel equations as described here:
 http://www.cs.cornell.edu/~bindel/class/cs5220-f11/code/sph.pdf
 
-Right now this implementation is unoptimized and runs entirely on the CPU. Will immediately begin work on writing an OpenCL kernel that will allow offloading of the interaction force computation onto the GPU.
-
-Have begun writing a OpenCL abstraction called 'CLWrapper' which will eventually contain all the funtionality required in order to initialize, build and compile a kernel, request, read and write buffers.
+Working on implementation of Spatial Grid Hashing as seen here:
+https://github.com/finallyjustice/sphfluid/tree/master/SPH_GPU_2D_v1
