@@ -4,3 +4,7 @@ http://www.cs.cornell.edu/~bindel/class/cs5220-f11/code/sph.pdf
 
 Working on implementation of Spatial Grid Hashing as seen here:
 https://github.com/finallyjustice/sphfluid/tree/master/SPH_GPU_2D_v1
+
+TODO:
+
+1) Split up the kernel into two kernels -> Hashing kernel and the force computation kernel (as we need to guarantee a global synchronization)
